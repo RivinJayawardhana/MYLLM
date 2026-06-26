@@ -1,3 +1,10 @@
+
+
+from attention_machenism import CausalAttention, MultiHeadAttention
+import torch
+import torch.nn as nn
+
+
 GPT_CONFIG_124M = {
     "vocab_size": 50257,     # Vocabulary size
     "context_length": 1024,  # Context length
@@ -7,10 +14,6 @@ GPT_CONFIG_124M = {
     "drop_rate": 0.1,        # Dropout rate
     "qkv_bias": False        # Query-Key-Value bias
 }
-
-from attention_machenism import CausalAttention, MultiHeadAttention
-import torch
-import torch.nn as nn
 
 class DummyGPTModel(nn.Module):
     def __init__(self, cfg):
@@ -195,15 +198,14 @@ class GPTModel(nn.Module):
         return logits
     
 
-def generate_text_simple(model, idx,                 #1
-                         max_new_tokens, context_size): 
+def generate_text_simple(model, idx,max_new_tokens, context_size): 
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -context_size:]    #2
         with torch.no_grad():
             logits = model(idx_cond)
 
         logits = logits[:, -1, :]                    #3
-        probas = torch.softmax(logits, dim=-1)           #4
+        probas  k= torch.softmax(logits, dim=-1)           #4
         idx_next = torch.argmax(probas, dim=-1, keepdim=True)    #5
         idx = torch.cat((idx, idx_next), dim=1)     #6
 
