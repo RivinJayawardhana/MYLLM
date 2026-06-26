@@ -1,7 +1,7 @@
 import torch
 import tiktoken
 
-from GPT_model import GPTModel, generate_text_simple
+from GPT_model import GPTModel, generate, generate_text_simple
 from Text_Processing import create_dataloader_v1
 
 
@@ -269,13 +269,16 @@ def main():
 
     print("Training completed!")
     tokenizer = tiktoken.get_encoding("gpt2")
-    token_ids = generate_text_simple(
-     model=model,
-     idx=text_to_token_ids("Every effort moves you", tokenizer),
-     max_new_tokens=25,
-     context_size=GPT_CONFIG_124M["context_length"]
+    token_ids = generate(
+    model=model,
+    idx=text_to_token_ids("Every effort moves you", tokenizer),
+    max_new_tokens=15,
+    context_size=GPT_CONFIG_124M["context_length"],
+    top_k=25,
+    temperature=1.4
 )
     print("Output text:\n", token_ids_to_text(token_ids, tokenizer))
+    
 
 
 if __name__ == "__main__":

@@ -209,7 +209,7 @@ def generate_text_simple(model, idx,max_new_tokens, context_size):
         idx_next = torch.argmax(probas, dim=-1, keepdim=True)    #5
         idx = torch.cat((idx, idx_next), dim=1)     #6
 
-    return 
+    return idx
 
 def generate(model, idx, max_new_tokens, context_size,
              temperature=0.0, top_k=None, eos_id=None):
