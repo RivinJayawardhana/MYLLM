@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 class SelfAttention_v1(nn.Module):

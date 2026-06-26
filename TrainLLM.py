@@ -2,7 +2,7 @@ import torch
 import tiktoken
 
 from GPT_model import GPTModel, generate_text_simple
-from Text_Preprocessing import create_dataloader_v1
+from Text_Processing import create_dataloader_v1
 
 
 GPT_CONFIG_124M = {
@@ -19,12 +19,13 @@ GPT_CONFIG_124M = {
 # ---------------- Token Utilities ---------------- #
 
 def text_to_token_ids(text, tokenizer):
-    encoded = tokenizer.encode(text, allowed_special={"<|endoftext|>"})
-    return torch.tensor(encoded).unsqueeze(0)
-
+    encoded = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
+    encoded_tensor = torch.tensor(encoded).unsqueeze(0)    #1
+    return encoded_tensor
 
 def token_ids_to_text(token_ids, tokenizer):
-    return tokenizer.decode(token_ids.squeeze(0).tolist())
+    flat = token_ids.squeeze(0)                #2
+    return tokenizer.decode(flat.tolist())
 
 
 # ---------------- Loss Functions ---------------- #
@@ -121,7 +122,7 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
             context_size=context_size
         )
 
-    print(token_ids_to_text(token_ids, tokenizer))
+    #print(token_ids_to_text(token_ids, tokenizer))
     model.train()
 
 
@@ -204,7 +205,7 @@ def train_model_simple(
 
 def main():
 
-    file_path = "the-verse.txt"  # Path to your text file
+    file_path = "the-verdict.txt"  # Path to your text file
 
     tokenizer = tiktoken.get_encoding("gpt2")
 

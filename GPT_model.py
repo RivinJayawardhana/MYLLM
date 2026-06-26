@@ -1,6 +1,6 @@
 
 
-from attention_machenism import CausalAttention, MultiHeadAttention
+from Attention_machenismttention_machenism import CausalAttention, MultiHeadAttention
 import torch
 import torch.nn as nn
 
@@ -205,7 +205,7 @@ def generate_text_simple(model, idx,max_new_tokens, context_size):
             logits = model(idx_cond)
 
         logits = logits[:, -1, :]                    #3
-        probas  k= torch.softmax(logits, dim=-1)           #4
+        probas  = torch.softmax(logits, dim=-1)           #4
         idx_next = torch.argmax(probas, dim=-1, keepdim=True)    #5
         idx = torch.cat((idx, idx_next), dim=1)     #6
 
