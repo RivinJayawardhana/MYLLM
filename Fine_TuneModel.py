@@ -45,5 +45,20 @@ def main():
     data = download_and_load_file(file_path, url)
     print("Number of entries:", len(data))
     print("Example entry:\n", data[50])
+
+    train_portion = int(len(data) * 0.85)    #1
+    test_portion = int(len(data) * 0.1)            #2
+    val_portion = len(data) - train_portion - test_portion    #3
+
+    train_data = data[:train_portion]
+    test_data = data[train_portion:train_portion + test_portion]
+    val_data = data[train_portion + test_portion:]
+
+    print("Training set length:", len(train_data))
+    print("Validation set length:", len(val_data))
+    print("Test set length:", len(test_data))
+
+
+    
 if __name__ == "__main__":
     main()
