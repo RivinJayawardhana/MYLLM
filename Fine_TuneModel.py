@@ -23,7 +23,17 @@ url = (
 data = download_and_load_file(file_path, url)
 print("Number of entries:", len(data))
 
+def format_input(entry):
+    instruction_text = (
+        f"Below is an instruction that describes a task. "
+        f"Write a response that appropriately completes the request."
+        f"\n\n### Instruction:\n{entry['instruction']}"
+    )
 
+    input_text = (
+        f"\n\n### Input:\n{entry['input']}" if entry["input"] else ""
+    )
+    return instruction_text + input_text
 
 def main():
     file_path = "instruction-data.json"
