@@ -278,6 +278,12 @@ def main():
     temperature=1.4
 )
     print("Output text:\n", token_ids_to_text(token_ids, tokenizer))
+    torch.save({
+    "model_state_dict": model.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
+    }, 
+    "model_and_optimizer.pth"
+)
     
 
 
