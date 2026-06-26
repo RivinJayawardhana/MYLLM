@@ -35,6 +35,92 @@ def download_and_load_file(file_path, url):
         data = json.load(file)
     return data
 
+def custom_collate_draft_1(
+    batch,
+    pad_token_id=50256,
+    device="cpu"
+):
+    batch_max_length = max(len(item)+1 for item in batch)   #1
+    inputs_lst = []
+
+    for item in batch:     #2
+        new_item = item.copy()
+        new_item += [pad_token_id]
+
+
+        padded = (
+            new_item + [pad_token_id] * 
+            (batch_max_length - len(new_item))
+        )
+        inputs = torch.tensor(padded[:-1])    #3
+        inputs_lst.append(inputs)
+
+    inputs_tensor = torch.stack(inputs_lst).to(device)     #4
+    return inputs_tensor
+
+def custom_collate_draft_2(
+    batch,
+    pad_token_id=50256,
+    device="cpu"
+):
+    batch_max_length = max(len(item)+1 for item in batch)
+    inputs_lst, targets_lst = [], []
+
+    for item in batch:
+        new_item = item.copy()
+        new_item += [pad_token_id]
+
+        padded = (
+            new_item + [pad_token_id] * 
+            (batch_max_length - len(new_item))
+        )
+        inputs = torch.tensor(padded[:-1])     #1
+        targets = torch.tensor(padded[1:])    #2
+        inputs_lst.append(inputs)
+        targets_lst.append(targets)
+
+    inputs_tensor = torch.stack(inputs_lst).to(device)
+    targets_tensor = torch.stack(targets_lst).to(device)
+    return inputs_tensor, targets_tensor
+
+def custom_collate_fn(
+    batch,
+    pad_token_id=50256,
+    ignore_index=-100,
+    allowed_max_length=None,
+    device="cpu"
+):
+    batch_max_length = max(len(item)+1 for item in batch)
+    inputs_lst, targets_lst = [], []
+
+    for item in batch:
+        new_item = item.copy()
+        new_item += [pad_token_id]
+
+
+        padded = (                               #1
+            new_item + [pad_token_id] *          #1
+            (batch_max_length - len(new_item))   #1
+        )
+        inputs = torch.tensor(padded[:-1])      #2
+        targets = torch.tensor(padded[1:])     #3
+
+        mask = targets == pad_token_id              #4
+        indices = torch.nonzero(mask).squeeze()     #4
+        if indices.numel() > 1:                     #4
+            targets[indices[1:]] = ignore_index     #4
+
+        if allowed_max_length is not None:
+            inputs = inputs[:allowed_max_length]       #5
+            targets = targets[:allowed_max_length]     #5
+
+        inputs_lst.append(inputs)
+        targets_lst.append(targets)
+
+    inputs_tensor = torch.stack(inputs_lst).to(device)
+    targets_tensor = torch.stack(targets_lst).to(device)
+    return inputs_tensor, targets_tensor
+
 file_path = "instruction-data.json"
 url = (
     "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
