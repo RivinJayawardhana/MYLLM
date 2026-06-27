@@ -6,7 +6,7 @@ import urllib.request
 from gpt_download import download_and_load_gpt2
 from GPT_model import GPTModel
 import numpy as np
-from TrainLLM import calc_loss_loader, train_model_simple
+from TrainLLM import calc_loss_loader, train_model_simple 
 import torch
 from torch.utils.data import Dataset, DataLoader
 import tiktoken
@@ -173,7 +173,7 @@ def format_input(entry):
 def main():
     print("=== STARTING MAIN FUNCTION ===")
     
-    # Device selection with fallback
+    # Device selection
     try:
         if torch.cuda.is_available():
             device = torch.device("cuda")
@@ -182,6 +182,7 @@ def main():
         else:
             device = torch.device("cpu")
             print("CUDA not available, using CPU")
+            torch.set_num_threads(8)
     except Exception as e:
         print(f"Error detecting device: {e}")
         device = torch.device("cpu")
@@ -189,104 +190,119 @@ def main():
     
     print(f"Device: {device}")
     
-    # Data loading
-    file_path = "instruction-data.json"
-    url = (
-        "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
-        "/main/ch07/01_main-chapter-code/instruction-data.json"
-    )
-
-    try:
-        data = download_and_load_file(file_path, url)
-        print("Number of entries:", len(data))
-        print("Example entry:\n", data[50])
-    except Exception as e:
-        print(f"Error loading data: {e}")
-        return
-
-    # Split data
-    train_portion = int(len(data) * 0.85)
-    test_portion = int(len(data) * 0.1)
-    val_portion = len(data) - train_portion - test_portion
-
-    train_data = data[:train_portion]
-    test_data = data[train_portion:train_portion + test_portion]
-    val_data = data[train_portion + test_portion:]
-
-    print("=== DATASETS CREATED ===")
-
-    # Use context_length = 1024 (must match pretrained model)
-    num_workers = 0
-    batch_size = 4  # Reduced for memory
-    context_length = 1024  # MUST BE 1024 for pretrained GPT-2
-    
-    torch.manual_seed(123)
-    customized_collate_fn = partial(
-        custom_collate_fn,
-        device=device,
-        allowed_max_length=context_length  # This will truncate sequences if needed
-    )
-
-    # Create dataloaders
-    try:
-        train_dataset = InstructionDataset(train_data, tokenizer)
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            collate_fn=customized_collate_fn,
-            shuffle=True,
-            drop_last=True,
-            num_workers=num_workers
-        )
-
-        val_dataset = InstructionDataset(val_data, tokenizer)
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=batch_size,
-            collate_fn=customized_collate_fn,
-            shuffle=False,
-            drop_last=False,
-            num_workers=num_workers
-        )
-
-        test_dataset = InstructionDataset(test_data, tokenizer)
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            collate_fn=customized_collate_fn,
-            shuffle=False,
-            drop_last=False,
-            num_workers=num_workers
-        )
-        print("=== DATALOADERS CREATED ===")
-    except Exception as e:
-        print(f"Error creating dataloaders: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-    # Model configuration - MUST match pretrained model
+    # Model configuration
     BASE_CONFIG = {
         "vocab_size": 50257,
-        "context_length": 1024,  # MUST be 1024 to match pretrained weights
+        "context_length": 1024,
         "drop_rate": 0.1,
         "qkv_bias": True
     }
-
+    
     model_configs = {
         "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
         "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
         "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
         "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
     }
-
+    
     CHOOSE_MODEL = "gpt2-small (124M)"
     BASE_CONFIG.update(model_configs[CHOOSE_MODEL])
-
+    
+    # Check if fine-tuned model exists
+    model_save_dir = "fine_tuned_gpt3"
+    model_path = os.path.join(model_save_dir, 'fine_tuned_gpt2/model.pt')
+    
+    if os.path.exists(model_path):
+        print(f"=== FINE-TUNED MODEL FOUND AT {model_path} ===")
+        response = input("Load fine-tuned model? (y/n): ")
+        if response.lower() == 'y':
+            try:
+                # Load the saved model
+                checkpoint = torch.load(model_path, map_location=device)
+                model = GPTModel(BASE_CONFIG)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                model.to(device)
+                model.eval()
+                print("=== FINE-TUNED MODEL LOADED SUCCESSFULLY ===")
+                
+                # Test the loaded model
+                test_input = torch.randint(0, 50257, (1, 10)).to(device)
+                with torch.no_grad():
+                    test_output = model(test_input)
+                print(f"=== MODEL TEST PASSED, output shape: {test_output.shape} ===")
+                
+                # You can now use the model for inference
+                print("=== MODEL READY FOR INFERENCE ===")
+                return
+            except Exception as e:
+                print(f"Error loading fine-tuned model: {e}")
+                print("Training from scratch...")
+    
+    # If no fine-tuned model found or user chose to train
+    print("=== TRAINING NEW MODEL ===")
+    
+    # Data loading
+    file_path = "alpaxa_data.json"
+    url = (
+        "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
+        "/main/ch07/01_main-chapter-code/instruction-data.json"
+    )
+    
+    try:
+        data = download_and_load_file(file_path, url)
+        print("Number of entries:", len(data))
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        return
+    
+    # Split data
+    train_portion = int(len(data) * 0.85)
+    test_portion = int(len(data) * 0.1)
+    val_portion = len(data) - train_portion - test_portion
+    
+    train_data = data[:train_portion]
+    test_data = data[train_portion:train_portion + test_portion]
+    val_data = data[train_portion + test_portion:]
+    
+    print("=== DATASETS CREATED ===")
+    
+    # Create dataloaders
+    num_workers = 0
+    batch_size = 4
+    context_length = 1024
+    
+    torch.manual_seed(123)
+    customized_collate_fn = partial(
+        custom_collate_fn,
+        device=device,
+        allowed_max_length=context_length
+    )
+    
+    train_dataset = InstructionDataset(train_data, tokenizer)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        collate_fn=customized_collate_fn,
+        shuffle=True,
+        drop_last=True,
+        num_workers=num_workers
+    )
+    
+    val_dataset = InstructionDataset(val_data, tokenizer)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        collate_fn=customized_collate_fn,
+        shuffle=False,
+        drop_last=False,
+        num_workers=num_workers
+    )
+    
+    print("=== DATALOADERS CREATED ===")
+    
+    # Load pretrained model
     model_size = CHOOSE_MODEL.split(" ")[-1].lstrip("(").rstrip(")")
-
-    print(f"=== LOADING MODEL: {model_size} ===")
-    print(f"Context length: {BASE_CONFIG['context_length']}")
+    print(f"=== LOADING PRETRAINED MODEL: {model_size} ===")
     
     try:
         settings, params = download_and_load_gpt2(
@@ -296,16 +312,12 @@ def main():
         print("=== MODEL PARAMS LOADED ===")
     except Exception as e:
         print(f"Error loading model params: {e}")
-        import traceback
-        traceback.print_exc()
         return
-
-    # Create and load model
+    
+    # Create and load weights
     try:
         model = GPTModel(BASE_CONFIG)
         print("=== MODEL CREATED ===")
-        print(f"Model context length: {model.pos_emb.weight.shape[0]}")
-        
         load_weights_into_gpt(model, params)
         print("=== WEIGHTS LOADED ===")
     except Exception as e:
@@ -313,92 +325,60 @@ def main():
         import traceback
         traceback.print_exc()
         return
-
+    
     # Move model to device
-    try:
-        print("=== ATTEMPTING model.eval() ===")
-        model.eval()
-        print("=== model.eval() SUCCESSFUL ===")
-        
-        print(f"=== ATTEMPTING model.to({device}) ===")
-        model.to(device)
-        print("=== model.to(device) SUCCESSFUL ===")
-        
-        # Test forward pass
-        print("=== TESTING FORWARD PASS ===")
-        test_input = torch.randint(0, 50257, (1, 10)).to(device)
-        with torch.no_grad():
-            test_output = model(test_input)
-        print(f"=== FORWARD PASS SUCCESSFUL, output shape: {test_output.shape} ===")
-        
-        if device.type == "cuda":
-            print(f"GPU memory after model load: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
-            print(f"GPU memory cached: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
-            
-    except Exception as e:
-        print(f"=== ERROR moving model to device: {e} ===")
-        import traceback
-        traceback.print_exc()
-        
-        if device.type == "cuda":
-            print("=== TRYING CPU INSTEAD ===")
-            try:
-                device = torch.device("cpu")
-                model.to(device)
-                print("=== MODEL MOVED TO CPU SUCCESSFULLY ===")
-            except Exception as e2:
-                print(f"=== ERROR moving to CPU: {e2} ===")
-                return
-        else:
-            return
-
+    model.to(device)
+    print(f"=== MODEL MOVED TO {device} ===")
+    
     # Calculate initial loss
-    try:
-        with torch.no_grad():
-            print("=== CALCULATING INITIAL LOSS ===")
-            train_loss = calc_loss_loader(
-                train_loader, model, device, num_batches=5
-            )
-            val_loss = calc_loss_loader(
-                val_loader, model, device, num_batches=5
-            )
-            print(f"Initial train loss: {train_loss:.4f}")
-            print(f"Initial val loss: {val_loss:.4f}")
-    except Exception as e:
-        print(f"Error calculating initial loss: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-    # Switch to training mode
-    model.train()
-    print("=== STARTING TRAINING ===")
-
+    with torch.no_grad():
+        print("=== CALCULATING INITIAL LOSS ===")
+        train_loss = calc_loss_loader(
+            train_loader, model, device, num_batches=5
+        )
+        val_loss = calc_loss_loader(
+            val_loader, model, device, num_batches=5
+        )
+        print(f"Initial train loss: {train_loss:.4f}")
+        print(f"Initial val loss: {val_loss:.4f}")
+    
     # Training
-    try:
-        start_time = time.time()
-        torch.manual_seed(123)
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=0.00005, weight_decay=0.1
-        )
-        num_epochs = 2
-
-        train_losses, val_losses, tokens_seen = train_model_simple(
-            model, train_loader, val_loader, optimizer, device,
-            num_epochs=num_epochs, eval_freq=5, eval_iter=5,
-            start_context=format_input(val_data[0]), tokenizer=tokenizer
-        )
-
-        end_time = time.time()
-        execution_time_minutes = (end_time - start_time) / 60
-        print(f"Training completed in {execution_time_minutes:.2f} minutes.")
-        print("=== MAIN FUNCTION COMPLETED ===")
-        
-    except Exception as e:
-        print(f"Error during training: {e}")
-        import traceback
-        traceback.print_exc()
-        return
+    print("=== STARTING TRAINING ===")
+    model.train()
+    
+    start_time = time.time()
+    torch.manual_seed(123)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=0.00005, weight_decay=0.1
+    )
+    num_epochs = 2
+    
+    train_losses, val_losses, tokens_seen = train_model_simple(
+        model, train_loader, val_loader, optimizer, device,
+        num_epochs=num_epochs, eval_freq=5, eval_iter=5,
+        start_context=format_input(val_data[0]), tokenizer=tokenizer
+    )
+    
+    end_time = time.time()
+    execution_time_minutes = (end_time - start_time) / 60
+    print(f"Training completed in {execution_time_minutes:.2f} minutes.")
+    
+    # SAVE THE MODEL!
+    print("=== SAVING FINE-TUNED MODEL ===")
+    os.makedirs(model_save_dir, exist_ok=True)
+    
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'model_config': BASE_CONFIG,
+        'vocab_size': 50257,
+        'embed_dim': BASE_CONFIG['emb_dim'],
+        'n_layers': BASE_CONFIG['n_layers'],
+        'n_heads': BASE_CONFIG['n_heads'],
+        'context_length': BASE_CONFIG['context_length'],
+    }, model_path)
+    
+    print(f"=== MODEL SAVED TO {model_path} ===")
+    print("=== MAIN FUNCTION COMPLETED ===")
 
 if __name__ == "__main__":
     print("=== SCRIPT STARTED ===")
