@@ -11,6 +11,10 @@ import numpy as np
 
 import torch
 from torch.utils.data import Dataset,DataLoader
+import tiktoken
+
+
+tokenizer = tiktoken.get_encoding("gpt2")
 
 class InstructionDataset(Dataset):
     def __init__(self, data, tokenizer):
