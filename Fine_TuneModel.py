@@ -351,7 +351,7 @@ def main():
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=0.00005, weight_decay=0.1
     )
-    num_epochs = 2
+    num_epochs = 1
     
     train_losses, val_losses, tokens_seen = train_model_simple(
         model, train_loader, val_loader, optimizer, device,
@@ -389,13 +389,6 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
 
-if __name__ == "__main__":
-    print("=== SCRIPT STARTED ===")
-    try:
-        main()
-    except Exception as e:
-        print(f"=== UNHANDLED ERROR: {e} ===")
-        import traceback
-        traceback.print_exc()
+
 
     
