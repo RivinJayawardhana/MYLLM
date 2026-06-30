@@ -83,15 +83,95 @@ GPT_CONFIG_124M = {
 ## Prerequisites
 
 - **Python 3.10+** (developed on 3.12)
+- **Docker** (optional) if you prefer the containerised route
 - A GPU is optional but strongly recommended for fine-tuning. The code auto-detects CUDA and falls back to CPU.
 
-### Install dependencies
+---
+
+## Getting started
+
+You can run the project two ways: a **local virtual environment** or **Docker**. Pick one.
+
+### Option A — Local virtual environment (venv)
+
+**1. Get the code**
+
+```bash
+git clone <your-repo-url> MYLLM
+cd MYLLM
+```
+
+**2. Create & activate a virtual environment**
+
+<details open>
+<summary><b>Windows (PowerShell)</b></summary>
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+> If activation is blocked, allow it for this session:
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`
+</details>
+
+<details>
+<summary><b>macOS / Linux (bash/zsh)</b></summary>
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+</details>
+
+**3. Install dependencies**
+
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+<details>
+<summary>or install individually</summary>
 
 ```bash
 pip install torch tiktoken numpy requests tqdm tensorflow streamlit
 ```
+</details>
 
-> `tensorflow` is only required by `gpt_download.py` to read the original GPT-2 TensorFlow checkpoints. `streamlit` is only needed for the web UI (below).
+**4. Run something**
+
+```bash
+# fine-tune with answer-only loss (downloads GPT-2 weights on first run)
+python Fine_TuneModel.py answer-only
+
+# check answers on held-out examples
+python evaluate_model.py
+
+# launch the RAG Q&A web app  ->  http://localhost:8501
+streamlit run rag_app.py
+```
+
+**5. Deactivate when done**
+
+```bash
+deactivate
+```
+
+> `tensorflow` is only required by `gpt_download.py` to read the original GPT-2 TensorFlow checkpoints. `streamlit` is only needed for the web UI. `numpy` is pinned `<2.0` for TensorFlow compatibility.
+
+### Option B — Docker
+
+See [Run with Docker](#run-with-docker) below for build & run commands. In short:
+
+```bash
+docker build -t myllm .
+docker run --rm -p 8501:8501 \
+    -v "$(pwd)/fine_tuned_gpt3:/app/fine_tuned_gpt3" \
+    -v "$(pwd)/gpt2:/app/gpt2" \
+    myllm
+# open http://localhost:8501
+```
 
 ---
 
@@ -359,6 +439,42 @@ for chunk, score in retriever.retrieve("What services are offered?", top_k=3):
 - For better semantic matching (synonyms, paraphrases) you can swap in an embedding model; the `.retrieve()` interface stays the same.
 
 > **Important for document Q&A:** for the model to answer *from* the retrieved context, it needs to be good at reading the `### Input:` field. The Alpaca data has many empty-input examples, so a model fine-tuned only on it under-uses long context. For best results, fine-tune on **context-grounded QA** data (`{context, question, answer}`, e.g. SQuAD-style) and/or use a **larger base model** (355M+).
+
+---
+
+## Run with Docker
+
+A `Dockerfile` (CPU) is included. Because model weights and the large dataset are **not** baked into the image (see `.dockerignore`), mount them at runtime as a volume.
+
+```bash
+# 1. Build
+docker build -t myllm .
+
+# 2. Run the RAG Q&A app, mounting your trained checkpoint(s) + data
+docker run --rm -p 8501:8501 \
+    -v "$(pwd)/fine_tuned_gpt3:/app/fine_tuned_gpt3" \
+    -v "$(pwd)/gpt2:/app/gpt2" \
+    myllm
+# open http://localhost:8501
+```
+
+The default command launches `rag_app.py`. Override it for other entry points:
+
+```bash
+# Full UI (generate + RAG + fine-tune)
+docker run --rm -p 8501:8501 -v "$(pwd):/app/data" myllm \
+    streamlit run streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+
+# Fine-tune inside the container (mount data + an output dir)
+docker run --rm \
+    -v "$(pwd)/alpaxa_data.json:/app/alpaxa_data.json" \
+    -v "$(pwd)/fine_tuned_gpt3:/app/fine_tuned_gpt3" \
+    -v "$(pwd)/gpt2:/app/gpt2" \
+    myllm python Fine_TuneModel.py answer-only
+```
+
+> **GPU:** the included image is CPU-only. For CUDA, switch the base image to an `nvidia/cuda:*-runtime` image, install the matching CUDA `torch` wheel, and run with `--gpus all`.
+> **Windows PowerShell:** replace `$(pwd)` with `${PWD}`.
 
 ---
 

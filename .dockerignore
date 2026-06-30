@@ -1,0 +1,29 @@
+# Version control / IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Large model weights & checkpoints (mount these as volumes at runtime)
+gpt2/
+model.pth
+*.pth
+*.pt
+fine_tuned_gpt2/
+fine_tuned_gpt3/
+
+# Large datasets (mount if you need to fine-tune in-container)
+alpaxa_data.json
+
+# Notebooks / scratch
+LLM.ipynb
+*.ipynb_checkpoints
+
+# Docs that don't belong in the image
+README.md
