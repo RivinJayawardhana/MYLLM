@@ -170,6 +170,127 @@ def format_input(entry):
     )
     return instruction_text + input_text
 
+
+MODEL_CONFIGS = {
+    "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
+    "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
+    "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
+    "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
+}
+
+
+def finetune_answer_only(
+    data_path="instruction-data.json",
+    data_url=(
+        "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
+        "/main/ch07/01_main-chapter-code/instruction-data.json"
+    ),
+    model_choice="gpt2-small (124M)",
+    num_epochs=2,
+    batch_size=4,
+    lr=5e-5,
+    context_length=1024,
+    save_path="fine_tuned_gpt3/answer_only_model.pt",
+    device=None,
+):
+    """Fine-tune with ANSWER-ONLY loss (loss computed only on the response
+    tokens, the prompt/context is masked out). This is the fix for the model
+    echoing/continuing the prompt instead of answering.
+
+    Everything is parameterised so you can run it however you want, e.g.:
+
+        from Fine_TuneModel import finetune_answer_only
+        finetune_answer_only(num_epochs=3, lr=3e-5,
+                             model_choice="gpt2-medium (355M)",
+                             save_path="my_qa_model.pt")
+
+    or from the shell:  python Fine_TuneModel.py answer-only
+
+    Returns (model, train_losses, val_losses).
+    """
+    # masked dataset + collate live in answer_only_loss.py (single source)
+    from answer_only_loss import (
+        InstructionDataset as AnswerOnlyDataset,
+        answer_only_collate_fn,
+    )
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[answer-only] Device: {device}")
+
+    if model_choice not in MODEL_CONFIGS:
+        raise ValueError(f"model_choice must be one of {list(MODEL_CONFIGS)}")
+
+    config = {
+        "vocab_size": 50257,
+        "context_length": context_length,
+        "drop_rate": 0.1,
+        "qkv_bias": True,
+    }
+    config.update(MODEL_CONFIGS[model_choice])
+    model_size = model_choice.split(" ")[-1].strip("()")
+
+    # --- data ---
+    data = download_and_load_file(data_path, data_url)
+    print(f"[answer-only] Examples: {len(data)}")
+
+    train_portion = int(len(data) * 0.85)
+    test_portion = int(len(data) * 0.10)
+    train_data = data[:train_portion]
+    val_data = data[train_portion + test_portion:] or data[-1:]
+
+    torch.manual_seed(123)
+    collate = partial(
+        answer_only_collate_fn, device=device, allowed_max_length=context_length
+    )
+    train_loader = DataLoader(
+        AnswerOnlyDataset(train_data, tokenizer),
+        batch_size=batch_size, collate_fn=collate,
+        shuffle=True, drop_last=True, num_workers=0,
+    )
+    val_loader = DataLoader(
+        AnswerOnlyDataset(val_data, tokenizer),
+        batch_size=batch_size, collate_fn=collate,
+        shuffle=False, drop_last=False, num_workers=0,
+    )
+    if len(train_loader) == 0:
+        raise ValueError("Not enough data for one batch — lower batch_size.")
+
+    # --- pretrained GPT-2 weights ---
+    print(f"[answer-only] Loading GPT-2 weights: {model_size}")
+    _, params = download_and_load_gpt2(model_size=model_size, models_dir="gpt2")
+    model = GPTModel(config)
+    load_weights_into_gpt(model, params)
+    model.to(device)
+
+    with torch.no_grad():
+        tl = calc_loss_loader(train_loader, model, device, num_batches=5)
+        vl = calc_loss_loader(val_loader, model, device, num_batches=5)
+    print(f"[answer-only] Initial loss — train {tl:.4f}  val {vl:.4f}")
+
+    # --- train (answer-only loss comes from the masked targets) ---
+    start_time = time.time()
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.1)
+    train_losses, val_losses, _ = train_model_simple(
+        model, train_loader, val_loader, optimizer, device,
+        num_epochs=num_epochs, eval_freq=5, eval_iter=5,
+        start_context=format_input(val_data[0]), tokenizer=tokenizer,
+    )
+    print(f"[answer-only] Trained in {(time.time() - start_time) / 60:.2f} min")
+
+    # --- save ---
+    if save_path:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+        torch.save(
+            {"model_state_dict": model.state_dict(), "model_config": config},
+            save_path,
+        )
+        print(f"[answer-only] Saved to {save_path}")
+
+    return model, train_losses, val_losses
+
+
 def main():
     print("=== STARTING MAIN FUNCTION ===")
     
@@ -381,9 +502,15 @@ def main():
     print("=== MAIN FUNCTION COMPLETED ===")
 
 if __name__ == "__main__":
+    import sys
     print("=== SCRIPT STARTED ===")
     try:
-        main()
+        # `python Fine_TuneModel.py answer-only`  -> answer-only loss fine-tune
+        # `python Fine_TuneModel.py`              -> original padding-only flow
+        if len(sys.argv) > 1 and sys.argv[1] in ("answer-only", "answer_only"):
+            finetune_answer_only()
+        else:
+            main()
     except Exception as e:
         print(f"=== UNHANDLED ERROR: {e} ===")
         import traceback

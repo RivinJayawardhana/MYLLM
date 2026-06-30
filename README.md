@@ -64,10 +64,10 @@ GPT_CONFIG_124M = {
 ### Install dependencies
 
 ```bash
-pip install torch tiktoken numpy requests tqdm tensorflow
+pip install torch tiktoken numpy requests tqdm tensorflow streamlit
 ```
 
-> `tensorflow` is only required by `gpt_download.py` to read the original GPT-2 TensorFlow checkpoints.
+> `tensorflow` is only required by `gpt_download.py` to read the original GPT-2 TensorFlow checkpoints. `streamlit` is only needed for the web UI (below).
 
 ---
 
@@ -188,6 +188,43 @@ python TrainLLM.py
 
 # 3. (Real model) Download GPT-2 weights + instruction fine-tune
 python Fine_TuneModel.py
+```
+
+---
+
+## Web UI (Streamlit)
+
+`streamlit_app.py` gives you a browser interface for both **inference** and **fine-tuning** — no editing code required.
+
+```bash
+streamlit run streamlit_app.py
+```
+
+**💬 Generate tab**
+- Enter a checkpoint path (default `fine_tuned_gpt2/model.pth`) and click **Load model**.
+- Type an **Instruction** (and optional **Input**), tune `max_new_tokens` / `temperature` / `top-k`, and click **Generate response**.
+- The app auto-detects the model config from the checkpoint, formats the Alpaca-style prompt, and shows just the model's response (with the full prompt+completion available in an expander).
+
+**📚 Ask your docs (RAG) tab**
+- Add knowledge by pasting text, uploading `.txt`/`.md` files, or pointing at a text file path, then click **Build / rebuild index**.
+- Ask a question — the app retrieves the most relevant chunks (TF-IDF, see `rag.py`), drops them into the prompt's `### Input:` field, and the model answers **from that context** instead of from memory.
+- This is the most reliable Q&A path for a small GPT-2: the model only has to extract/rephrase, not recall facts. Retrieved sources are shown under an expander.
+- Retrieval is pure NumPy (no extra dependencies). For higher quality you can swap `TfidfRetriever` for an embedding model — the `.retrieve()` interface stays the same.
+
+**🎯 Fine-tune tab**
+1. Pick instruction data — a JSON path (default `instruction-data.json`) or upload your own.
+2. Choose starting weights — **download pretrained GPT-2** or **continue from an existing checkpoint**.
+3. Set epochs / batch size / learning rate / dropout and a save path.
+4. Click **Start fine-tuning** — it trains (live loss prints to the console), plots train/val loss, and saves a checkpoint you can immediately load back in the Generate tab.
+
+> Inference only needs `torch`, `tiktoken`, and `streamlit`. TensorFlow is imported lazily and is only required if you choose to **download pretrained GPT-2** weights in the Fine-tune tab.
+
+The uploaded/loaded data must be a JSON list of `{"instruction", "input", "output"}` objects, e.g.:
+
+```json
+[
+  {"instruction": "Edit the sentence for grammar.", "input": "He go to school.", "output": "He goes to school."}
+]
 ```
 
 ---

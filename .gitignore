@@ -1,3 +1,4 @@
 model.pth
 **/__pycache__/
 /gpt2/
+*.pt
