@@ -180,7 +180,7 @@ MODEL_CONFIGS = {
 
 
 def finetune_answer_only(
-    data_path="instruction-data.json",
+    data_path="alpaxa_data.json",
     data_url=(
         "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
         "/main/ch07/01_main-chapter-code/instruction-data.json"
@@ -191,6 +191,8 @@ def finetune_answer_only(
     lr=5e-5,
     context_length=1024,
     save_path="fine_tuned_gpt3/answer_only_model.pt",
+    max_examples=3000,
+    shuffle_before_subset=True,
     device=None,
 ):
     """Fine-tune with ANSWER-ONLY loss (loss computed only on the response
@@ -232,7 +234,16 @@ def finetune_answer_only(
 
     # --- data ---
     data = download_and_load_file(data_path, data_url)
-    print(f"[answer-only] Examples: {len(data)}")
+    print(f"[answer-only] Loaded {len(data)} examples from {data_path}")
+
+    # keep only `max_examples` (random sample so it's representative, not the
+    # first N which can be topically clustered)
+    if max_examples is not None and len(data) > max_examples:
+        if shuffle_before_subset:
+            import random
+            random.Random(123).shuffle(data)
+        data = data[:max_examples]
+        print(f"[answer-only] Using {len(data)} examples for training")
 
     train_portion = int(len(data) * 0.85)
     test_portion = int(len(data) * 0.10)
