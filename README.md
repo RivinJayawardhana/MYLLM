@@ -15,14 +15,22 @@ The pipeline takes you through the **full lifecycle** of an LLM:
 3. **Assemble** the full GPT model (124M parameters).
 4. **Pretrain** the model on plain text to predict the next token.
 5. **Load** real pretrained OpenAI GPT-2 weights into the custom model.
-6. **Fine-tune** the model on instruction–response data (Alpaca-style) so it can follow instructions.
-7. **Generate** text from the trained/fine-tuned model.
+6. **Fine-tune** the model on instruction–response data (Alpaca-style) so it can follow instructions — with standard or **answer-only loss**.
+7. **Evaluate** the fine-tuned model on a held-out test split.
+8. **Generate** text, chat from a browser UI, or do **document Q&A with RAG**.
+
+### Two ways to use it
+
+- **As a learning resource** — every layer of a GPT is hand-written and readable.
+- **As a small working assistant** — load GPT-2 weights, fine-tune on instructions, and query it via the Streamlit apps (including retrieval-augmented Q&A over your own documents).
 
 ---
 
 ## Project structure
 
-| File / Folder | Purpose |
+**Core model & training**
+
+| File | Purpose |
 |---|---|
 | `Text_Processing.py` | Tokenizers (`SimpleTokenizerV1/V2`) and the `GPTDatasetV1` + `create_dataloader_v1` data-loading pipeline (uses the `tiktoken` GPT-2 BPE tokenizer). |
 | `Attention_machenism.py` | Attention from scratch: `SelfAttention_v1/v2`, `CausalAttention`, and `MultiHeadAttention`. |
@@ -30,10 +38,26 @@ The pipeline takes you through the **full lifecycle** of an LLM:
 | `TrainLLM.py` | Pretraining loop: loss functions, evaluation, the `train_model_simple` training loop, and a `main()` that pretrains on `the-verdict.txt`. |
 | `download.py` | Helper to fetch `gpt_download.py` from the upstream repo. |
 | `gpt_download.py` | Downloads and loads the official OpenAI GPT-2 checkpoints (124M / 355M / 774M / 1558M). |
-| `Fine_TuneModel.py` | Instruction fine-tuning: loads GPT-2 weights, builds the `InstructionDataset` with a custom padding/collate function, fine-tunes, and saves the model. |
-| `the-verdict.txt` | Small text corpus used for pretraining demos. |
-| `instruction-data.json` / `alpaxa_data.json` | Instruction–response datasets for fine-tuning. |
+
+**Fine-tuning, evaluation & RAG**
+
+| File | Purpose |
+|---|---|
+| `Fine_TuneModel.py` | Instruction fine-tuning. Standard `main()` (padding-only loss) **and** `finetune_answer_only(...)` for answer-only-loss fine-tuning on `alpaxa_data.json`. |
+| `answer_only_loss.py` | The **answer-only loss** mechanism: a masked `InstructionDataset` + `answer_only_collate_fn` that compute loss on the response tokens only. Importable + runnable. |
+| `evaluate_model.py` | Qualitative eval: runs the held-out test split through the model and prints *question → reference → generated* answers. |
+| `rag.py` | Lightweight **retrieval** for document Q&A: `TfidfRetriever` (pure NumPy) with `chunk_text`, `.retrieve()`, `.context_for()`. |
+
+**Apps & data**
+
+| File / Folder | Purpose |
+|---|---|
+| `streamlit_app.py` | Full web UI — **Generate**, **Ask your docs (RAG)**, and **Fine-tune** tabs. |
+| `rag_app.py` | Focused **RAG Q&A** web app: load a model, add documents, ask grounded questions. |
 | `LLM.ipynb` | Notebook for interactive experimentation. |
+| `the-verdict.txt` | Small text corpus used for the pretraining demo. |
+| `instruction-data.json` | ~1.1k instruction examples (Alpaca-style). |
+| `alpaxa_data.json` | ~52k instruction examples (full Alpaca set). |
 | `model.pth` / `fine_tuned_gpt2/` / `fine_tuned_gpt3/` | Saved model checkpoints. |
 
 > Note: `model.pth` and the `gpt2/` weight folder are git-ignored (they're large binary artifacts).
@@ -152,6 +176,8 @@ On the next run, if a saved fine-tuned model is found it will offer to load it i
 Load fine-tuned model? (y/n):
 ```
 
+> 💡 For noticeably better question-answering, use **answer-only loss** instead — see the [Answer-only loss fine-tuning](#answer-only-loss-fine-tuning-recommended-for-qa) section below.
+
 ### Step 7 — Generate text
 Use the `generate` helper for sampling with temperature and top-k:
 
@@ -181,13 +207,21 @@ print(token_ids_to_text(ids, tokenizer))
 
 ```bash
 # 1. Install deps
-pip install torch tiktoken numpy requests tqdm tensorflow
+pip install torch tiktoken numpy requests tqdm tensorflow streamlit
 
 # 2. (Learn the basics) Pretrain on the small corpus
 python TrainLLM.py
 
-# 3. (Real model) Download GPT-2 weights + instruction fine-tune
-python Fine_TuneModel.py
+# 3. (Real model) Download GPT-2 weights + fine-tune with answer-only loss
+python Fine_TuneModel.py answer-only
+
+# 4. Check the answers on held-out examples
+python evaluate_model.py
+
+# 5. Chat / do document Q&A in the browser
+streamlit run rag_app.py        # focused RAG Q&A
+# or
+streamlit run streamlit_app.py  # full UI (generate + RAG + fine-tune)
 ```
 
 ---
@@ -229,6 +263,105 @@ The uploaded/loaded data must be a JSON list of `{"instruction", "input", "outpu
 
 ---
 
+## Answer-only loss fine-tuning (recommended for Q&A)
+
+By default the instruction collate function only masks **padding**, so the model spends most of its loss learning to reproduce the *prompt* (instruction + context) rather than the *answer*. The visible symptom is a model that **echoes the prompt or continues the text instead of answering**.
+
+`answer_only_loss.py` fixes this by masking every token **before `### Response:`** with `ignore_index = -100` (which cross-entropy skips), so loss is computed **only on the answer**. It also keeps the first end-of-text token as a real target, so the model learns to *stop*.
+
+### Run it
+
+`Fine_TuneModel.py` exposes a fully-parameterised function:
+
+```python
+from Fine_TuneModel import finetune_answer_only
+
+# defaults: alpaxa_data.json, 10k random examples (seed 123), 2 epochs, lr 5e-5,
+# gpt2-small, saves to fine_tuned_gpt3/answer_only_model.pt
+finetune_answer_only()
+
+# customise freely
+finetune_answer_only(
+    max_examples=10000,                 # None = use all ~52k
+    num_epochs=1,
+    lr=3e-5,
+    model_choice="gpt2-medium (355M)",
+    batch_size=4,
+    save_path="my_qa_model.pt",
+)
+```
+
+Or from the shell:
+
+```bash
+python Fine_TuneModel.py answer-only     # answer-only loss fine-tune
+python Fine_TuneModel.py                 # original padding-only flow
+```
+
+Key parameters of `finetune_answer_only`:
+
+| Param | Default | Meaning |
+|---|---|---|
+| `data_path` | `alpaxa_data.json` | Instruction JSON (auto-downloaded if missing). |
+| `max_examples` | `10000` | Cap the dataset size; `None` uses all examples. |
+| `shuffle_before_subset` | `True` | Random sample (seed 123) vs. first N. |
+| `model_choice` | `gpt2-small (124M)` | Also `medium`/`large`/`xl`. |
+| `num_epochs` / `batch_size` / `lr` | `2` / `4` / `5e-5` | Standard training knobs. |
+| `save_path` | `fine_tuned_gpt3/answer_only_model.pt` | Where to write the checkpoint. |
+
+> **Verify the masking** (decodes the *unmasked* tokens, which should be the answer only):
+> ```bash
+> python answer_only_loss.py --demo
+> ```
+
+---
+
+## Evaluating the model
+
+Loss tells you the model is learning; it doesn't tell you the answers are good. `evaluate_model.py` runs the **held-out test split** (examples never seen in training) through the model and prints, per example, the instruction, the reference answer, and the generated answer.
+
+```bash
+python evaluate_model.py
+python evaluate_model.py --num_samples 15 --temperature 0.0
+python evaluate_model.py --model_path fine_tuned_gpt3/answer_only_model.pt --max_examples 10000
+```
+
+> Keep `--max_examples` equal to what you trained with, so the reconstructed test split is genuinely unseen. `--temperature 0.0` (greedy) is best for factual answers.
+
+**Reading typical fine-tuning losses:** a train/val gap (e.g. train `1.6` / val `2.3`) indicates mild overfitting. Val perplexity ≈ e^(val loss); shrink the gap with **more data** (`max_examples=10000+`) or **fewer epochs** (`num_epochs=1`).
+
+---
+
+## RAG Q&A over your own documents (`rag_app.py`)
+
+The most reliable way to get useful answers from a small model: don't make it *recall* facts, make it *answer from retrieved text*.
+
+```bash
+streamlit run rag_app.py
+```
+
+1. **Load model** (sidebar) — defaults to `fine_tuned_gpt3/answer_only_model.pt`.
+2. **Add documents** — paste text, upload `.txt`/`.md`, or give a file path, then **Build index**.
+3. **Ask a question** — the app retrieves the top-N relevant chunks (`rag.py`), injects them into the prompt's `### Input:` field, and the model answers from that context. Retrieved **sources** are shown with relevance scores.
+
+How retrieval works (`rag.py`):
+
+```python
+from rag import TfidfRetriever
+
+retriever = TfidfRetriever.from_text(open("docs.txt", encoding="utf-8").read())
+for chunk, score in retriever.retrieve("What services are offered?", top_k=3):
+    print(round(score, 3), chunk[:80])
+```
+
+- `chunk_text()` splits documents into overlapping word windows (respecting paragraphs).
+- `TfidfRetriever` ranks chunks by TF-IDF cosine similarity — **pure NumPy, no extra dependencies**.
+- For better semantic matching (synonyms, paraphrases) you can swap in an embedding model; the `.retrieve()` interface stays the same.
+
+> **Important for document Q&A:** for the model to answer *from* the retrieved context, it needs to be good at reading the `### Input:` field. The Alpaca data has many empty-input examples, so a model fine-tuned only on it under-uses long context. For best results, fine-tune on **context-grounded QA** data (`{context, question, answer}`, e.g. SQuAD-style) and/or use a **larger base model** (355M+).
+
+---
+
 ## How it works (architecture at a glance)
 
 ```
@@ -257,12 +390,33 @@ token IDs ──► token embedding + positional embedding
 
 ---
 
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| **Model echoes the prompt back** / prints the whole `### Instruction …` block | Inference prompt didn't cue `### Response:`, or trained with padding-only loss | The apps now append `### Response:` and strip it on output; fine-tune with **answer-only loss** (`finetune_answer_only`). |
+| **Fluent text but ignores your context / makes facts up** | Loaded raw GPT-2 weights (not instruction-tuned), or model under-uses `### Input:` | Fine-tune on instructions; for docs Q&A use context-grounded data + a larger model. |
+| **Rambles, never stops, runs into a new "### Instruction"** | Not stopping at EOS, or `max_new_tokens` too high | Lower max tokens; ensure training answers end cleanly (answer-only loss keeps the EOS target). |
+| **Gibberish / random tokens** | Config mismatch on load (`qkv_bias`/size) or temperature too high | Load checkpoints saved with `model_config`; set temperature `0.0–0.3`, top-k ≤ 10. |
+| **Right idea, wrong details** | 124M is too small to *know* facts | Use RAG (`rag_app.py`) and/or step up to 355M+. |
+| **CUDA out of memory** | Batch/context too large | Lower `batch_size` or `context_length`, or run on CPU. |
+| **`tensorflow` install issues** | Only needed to read original GPT-2 checkpoints | Imported lazily — inference/RAG don't need it. |
+
 ## Notes & tips
 
-- **CUDA out of memory?** Lower `batch_size` (in `Fine_TuneModel.py`) or `context_length`, or run on CPU.
-- **`tensorflow` install issues?** It is only needed to read the original GPT-2 checkpoints in `gpt_download.py`.
 - The pretraining demo uses `context_length = 256` (in `TrainLLM.py`) while fine-tuning uses the full `1024`.
-- Checkpoints save both `model_state_dict` and the config so you can rebuild the exact model on load.
+- Checkpoints save both `model_state_dict` and the config so the apps can rebuild the exact model on load (with a fallback that infers config from a raw state dict).
+- **For factual Q&A**, prefer greedy decoding (`temperature = 0.0`); for creative text, raise temperature and use top-k.
+- **Prompt format matters:** inference must use the same `### Instruction / ### Input / ### Response` format the model was trained on — the apps and helpers handle this for you.
+
+---
+
+## Dependencies by task
+
+| You want to… | Needs |
+|---|---|
+| Run inference / generate / RAG | `torch`, `tiktoken`, `streamlit`, `numpy` |
+| Download GPT-2 weights / fine-tune from them | + `tensorflow`, `requests`, `tqdm`, `numpy` |
 
 ---
 
